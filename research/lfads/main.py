@@ -188,6 +188,8 @@ for key in datasets:
 hps.num_steps = datasets[list(datasets.keys())[0]]['num_steps']
 hps.ndatasets = len(hps.dataset_names)
 
+sys.exit()
+
 if hps.num_steps_for_gen_ic > hps.num_steps: hps.num_steps_for_gen_ic = hps.num_steps
 
 # Build and run the model, for varying purposes.
