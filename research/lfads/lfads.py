@@ -1025,8 +1025,7 @@ class LFADS(object):
     self.logfile = os.path.join(hps.lfads_save_dir, "lfads_log")
     self.writer = tf.summary.FileWriter(self.logfile)
 
-  def build_feed_dict(self, train_name, data_bxtxd, ext_input_bxtxi=None,
-                      keep_prob=None):
+  def build_feed_dict(self, train_name, data_bxtxd, ext_input_bxtxi=None,keep_prob=None):
     """Build the feed dictionary, handles cases where there is no value defined.
 
     Args:
@@ -1057,8 +1056,7 @@ class LFADS(object):
     return feed_dict
 
   @staticmethod
-  def get_batch(data_extxd, ext_input_extxi=None, batch_size=None,
-                example_idxs=None):
+  def get_batch(data_extxd, ext_input_extxi=None, batch_size=None,example_idxs=None):
     """Get a batch of data, either randomly chosen, or specified directly.
 
     Args:
@@ -1226,102 +1224,6 @@ class LFADS(object):
 
     return all_name_example_idx_pairs
 
-  def train_epoch(self, datasets, batch_size=None, do_save_ckpt=True):
-    """Train the model through the entire dataset once.
-
-    Args:
-      datasets: A dict of data dicts.  The dataset dict is simply a
-        name(string)-> data dictionary mapping (See top of lfads.py).
-      batch_size (optional):  The batch_size to use
-      do_save_ckpt (optional): Should the routine save a checkpoint on this
-        training epoch?
-
-    Returns:
-    A tuple with 6 float values:
-      (total cost of the epoch, epoch reconstruction cost,
-       epoch kl cost, KL weight used this training epoch,
-       total l2 cost on generator, and the corresponding weight).
-    """
-    ops_to_eval = [self.cost, self.recon_cost,
-                   self.kl_cost, self.kl_weight,
-                   self.l2_cost, self.l2_weight,
-                   self.train_op]
-    collected_op_values = self.run_epoch(datasets, ops_to_eval, kind="train")
-
-    total_cost = total_recon_cost = total_kl_cost = 0.0
-    # normalizing by batch done in distributions.py
-    epoch_size = len(collected_op_values)
-    for op_values in collected_op_values:
-      total_cost += op_values[0]
-      total_recon_cost += op_values[1]
-      total_kl_cost += op_values[2]
-
-    kl_weight = collected_op_values[-1][3]
-    l2_cost = collected_op_values[-1][4]
-    l2_weight = collected_op_values[-1][5]
-
-    epoch_total_cost = total_cost / epoch_size
-    epoch_recon_cost = total_recon_cost / epoch_size
-    epoch_kl_cost = total_kl_cost / epoch_size
-
-    if do_save_ckpt:
-      session = tf.get_default_session()
-      checkpoint_path = os.path.join(self.hps.lfads_save_dir,
-                                     self.hps.checkpoint_name + '.ckpt')
-      self.seso_saver.save(session, checkpoint_path,
-                           global_step=self.train_step)
-
-    return epoch_total_cost, epoch_recon_cost, epoch_kl_cost, \
-        kl_weight, l2_cost, l2_weight
-
-
-  def run_epoch(self, datasets, ops_to_eval, kind="train", batch_size=None,
-                do_collect=True, keep_prob=None):
-    """Run the model through the entire dataset once.
-
-    Args:
-      datasets: A dict of data dicts.  The dataset dict is simply a
-        name(string)-> data dictionary mapping (See top of lfads.py).
-      ops_to_eval: A list of tensorflow operations that will be evaluated in
-        the tf.session.run() call.
-      batch_size (optional):  The batch_size to use
-      do_collect (optional): Should the routine collect all session.run
-        output as a list, and return it?
-      keep_prob (optional): The dropout keep probability.
-
-    Returns:
-      A list of lists, the internal list is the return for the ops for each
-      session.run() call.  The outer list collects over the epoch.
-    """
-    hps = self.hps
-    all_name_example_idx_pairs = \
-        self.shuffle_and_flatten_datasets(datasets, kind)
-
-    kind_data = kind + '_data'
-    kind_ext_input = kind + '_ext_input'
-
-    total_cost = total_recon_cost = total_kl_cost = 0.0
-    session = tf.get_default_session()
-    epoch_size = len(all_name_example_idx_pairs)
-    evaled_ops_list = []
-    for name, example_idxs in all_name_example_idx_pairs:
-      data_dict = datasets[name]
-      data_extxd = data_dict[kind_data]
-      if hps.output_dist == 'poisson' and hps.temporal_spike_jitter_width > 0:
-        data_extxd = self.shuffle_spikes_in_time(data_extxd)
-
-      ext_input_extxi = data_dict[kind_ext_input]
-      data_bxtxd, ext_input_bxtxi = self.get_batch(data_extxd, ext_input_extxi,
-                                                   example_idxs=example_idxs)
-
-      feed_dict = self.build_feed_dict(name, data_bxtxd, ext_input_bxtxi,
-                                       keep_prob=keep_prob)
-      evaled_ops_np = session.run(ops_to_eval, feed_dict=feed_dict)
-      if do_collect:
-        evaled_ops_list.append(evaled_ops_np)
-
-    return evaled_ops_list
-
   def summarize_all(self, datasets, summary_values):
     """Plot and summarize stuff in tensorboard.
 
@@ -1389,7 +1291,6 @@ class LFADS(object):
       csv_file = os.path.join(self.hps.lfads_save_dir, self.hps.csv_log+'.csv')
       with open(csv_file, "a") as myfile:
         myfile.write(csv_outstr)
-
 
   def plot_single_example(self, datasets):
     """Plot an image relating to a randomly chosen, specific example.  We use
@@ -1471,128 +1372,11 @@ class LFADS(object):
                                feed_dict={self.example_image : example_image})
     self.writer.add_summary(example_summ)
 
-  def train_model(self, datasets):
-    """Train the model, print per-epoch information, and save checkpoints.
 
-    Loop over training epochs. The function that actually does the
-    training is train_epoch.  This function iterates over the training
-    data, one epoch at a time.  The learning rate schedule is such
-    that it will stay the same until the cost goes up in comparison to
-    the last few values, then it will drop.
 
-    Args:
-      datasets: A dict of data dicts.  The dataset dict is simply a
-        name(string)-> data dictionary mapping (See top of lfads.py).
-    """
-    hps = self.hps
-    has_any_valid_set = False
-    for data_dict in datasets.values():
-      if data_dict['valid_data'] is not None:
-        has_any_valid_set = True
-        break
 
-    session = tf.get_default_session()
-    lr = session.run(self.learning_rate)
-    lr_stop = hps.learning_rate_stop
-    i = -1
-    train_costs = []
-    valid_costs = []
-    ev_total_cost = ev_recon_cost = ev_kl_cost = 0.0
-    lowest_ev_cost = np.Inf
-    while True:
-      i += 1
-      do_save_ckpt = True if i % 10 ==0 else False
-      tr_total_cost, tr_recon_cost, tr_kl_cost, kl_weight, l2_cost, l2_weight = \
-                self.train_epoch(datasets, do_save_ckpt=do_save_ckpt)
 
-      # Evaluate the validation cost, and potentially save.  Note that this
-      # routine will not save a validation checkpoint until the kl weight and
-      # l2 weights are equal to 1.0.
-      if has_any_valid_set:
-        ev_total_cost, ev_recon_cost, ev_kl_cost = \
-            self.eval_cost_epoch(datasets, kind='valid')
-        valid_costs.append(ev_total_cost)
-
-        # > 1 may give more consistent results, but not the actual lowest vae.
-        # == 1 gives the lowest vae seen so far.
-        n_lve = 1
-        run_avg_lve = np.mean(valid_costs[-n_lve:])
-
-        # conditions for saving checkpoints:
-        #   KL weight must have finished stepping (>=1.0), AND
-        #   L2 weight must have finished stepping OR L2 is not being used, AND
-        #   the current run has a lower LVE than previous runs AND
-        #     len(valid_costs > n_lve) (not sure what that does)
-        if kl_weight >= 1.0 and \
-          (l2_weight >= 1.0 or \
-           (self.hps.l2_gen_scale == 0.0 and self.hps.l2_con_scale == 0.0)) \
-           and (len(valid_costs) > n_lve and run_avg_lve < lowest_ev_cost):
-
-          lowest_ev_cost = run_avg_lve
-          checkpoint_path = os.path.join(self.hps.lfads_save_dir,
-                                         self.hps.checkpoint_name + '_lve.ckpt')
-          self.lve_saver.save(session, checkpoint_path,
-                              global_step=self.train_step,
-                              latest_filename='checkpoint_lve')
-
-      # Plot and summarize.
-      values = {'nepochs':i, 'has_any_valid_set': has_any_valid_set,
-                'tr_total_cost':tr_total_cost, 'ev_total_cost':ev_total_cost,
-                'tr_recon_cost':tr_recon_cost, 'ev_recon_cost':ev_recon_cost,
-                'tr_kl_cost':tr_kl_cost, 'ev_kl_cost':ev_kl_cost,
-                'l2_weight':l2_weight, 'kl_weight':kl_weight,
-                'l2_cost':l2_cost}
-      self.summarize_all(datasets, values)
-      self.plot_single_example(datasets)
-
-      # Manage learning rate.
-      train_res = tr_total_cost
-      n_lr = hps.learning_rate_n_to_compare
-      if len(train_costs) > n_lr and train_res > np.max(train_costs[-n_lr:]):
-        _ = session.run(self.learning_rate_decay_op)
-        lr = session.run(self.learning_rate)
-        print("     Decreasing learning rate to %f." % lr)
-        # Force the system to run n_lr times while at this lr.
-        train_costs.append(np.inf)
-      else:
-        train_costs.append(train_res)
-
-      if lr < lr_stop:
-        print("Stopping optimization based on learning rate criteria.")
-        break
-
-  def eval_cost_epoch(self, datasets, kind='train', ext_input_extxi=None,
-                      batch_size=None):
-    """Evaluate the cost of the epoch.
-
-    Args:
-      data_dict: The dictionary of data (training and validation) used for
-        training and evaluation of the model, respectively.
-
-    Returns:
-      a 3 tuple of costs:
-        (epoch total cost, epoch reconstruction cost, epoch KL cost)
-    """
-    ops_to_eval = [self.cost, self.recon_cost, self.kl_cost]
-    collected_op_values = self.run_epoch(datasets, ops_to_eval, kind=kind,
-                                         keep_prob=1.0)
-
-    total_cost = total_recon_cost = total_kl_cost = 0.0
-    # normalizing by batch done in distributions.py
-    epoch_size = len(collected_op_values)
-    for op_values in collected_op_values:
-      total_cost += op_values[0]
-      total_recon_cost += op_values[1]
-      total_kl_cost += op_values[2]
-
-    epoch_total_cost = total_cost / epoch_size
-    epoch_recon_cost = total_recon_cost / epoch_size
-    epoch_kl_cost = total_kl_cost / epoch_size
-
-    return epoch_total_cost, epoch_recon_cost, epoch_kl_cost
-
-  def eval_model_runs_batch(self, data_name, data_bxtxd, ext_input_bxtxi=None,
-                            do_eval_cost=False, do_average_batch=False):
+  def eval_model_runs_batch(self, data_name, data_bxtxd, ext_input_bxtxi=None,do_eval_cost=False, do_average_batch=False):
     """Returns all the goodies for the entire model, per batch.
 
     If data_bxtxd and ext_input_bxtxi can have fewer than batch_size along dim 1
@@ -1734,8 +1518,7 @@ class LFADS(object):
 
     return model_vals
 
-  def eval_model_runs_avg_epoch(self, data_name, data_extxd,
-                                ext_input_extxi=None):
+  def eval_model_runs_avg_epoch(self, data_name, data_extxd,ext_input_extxi=None):
     """Returns all the expected value for goodies for the entire model.
 
     The expected value is taken over hidden (z) variables, namely the initial
@@ -1837,8 +1620,7 @@ class LFADS(object):
     model_runs['train_steps'] = train_steps
     return model_runs
 
-  def eval_model_runs_push_mean(self, data_name, data_extxd,
-                                ext_input_extxi=None):
+  def eval_model_runs_push_mean(self, data_name, data_extxd,ext_input_extxi=None):
     """Returns values of interest for the  model by pushing the means through
 
     The mean values for both initial conditions and the control inputs are
@@ -2170,3 +1952,211 @@ class LFADS(object):
           spikes_bxtxd[b,t,n] = count
 
     return spikes_bxtxd
+
+
+
+  # def train_epoch(self, datasets, batch_size=None, do_save_ckpt=True):
+  #   """Train the model through the entire dataset once.
+
+  #   Args:
+  #     datasets: A dict of data dicts.  The dataset dict is simply a
+  #       name(string)-> data dictionary mapping (See top of lfads.py).
+  #     batch_size (optional):  The batch_size to use
+  #     do_save_ckpt (optional): Should the routine save a checkpoint on this
+  #       training epoch?
+
+  #   Returns:
+  #   A tuple with 6 float values:
+  #     (total cost of the epoch, epoch reconstruction cost,
+  #      epoch kl cost, KL weight used this training epoch,
+  #      total l2 cost on generator, and the corresponding weight).
+  #   """
+  #   ops_to_eval = [self.cost, self.recon_cost, self.kl_cost, self.kl_weight, self.l2_cost, self.l2_weight, self.train_op]
+  #   collected_op_values = self.run_epoch(datasets, ops_to_eval, kind="train")
+
+  #   total_cost = total_recon_cost = total_kl_cost = 0.0
+  #   # normalizing by batch done in distributions.py
+  #   epoch_size = len(collected_op_values)
+  #   for op_values in collected_op_values:
+  #     total_cost += op_values[0]
+  #     total_recon_cost += op_values[1]
+  #     total_kl_cost += op_values[2]
+
+  #   kl_weight = collected_op_values[-1][3]
+  #   l2_cost = collected_op_values[-1][4]
+  #   l2_weight = collected_op_values[-1][5]
+
+  #   epoch_total_cost = total_cost / epoch_size
+  #   epoch_recon_cost = total_recon_cost / epoch_size
+  #   epoch_kl_cost = total_kl_cost / epoch_size
+
+  #   if do_save_ckpt:
+  #     session = tf.get_default_session()
+  #     checkpoint_path = os.path.join(self.hps.lfads_save_dir,
+  #                                    self.hps.checkpoint_name + '.ckpt')
+  #     self.seso_saver.save(session, checkpoint_path,
+  #                          global_step=self.train_step)
+
+  #   return epoch_total_cost, epoch_recon_cost, epoch_kl_cost, kl_weight, l2_cost, l2_weight
+
+    # def run_epoch(self, datasets, ops_to_eval, kind="train", batch_size=None,do_collect=True, keep_prob=None):
+    # """Run the model through the entire dataset once.
+
+    # Args:
+    #   datasets: A dict of data dicts.  The dataset dict is simply a
+    #     name(string)-> data dictionary mapping (See top of lfads.py).
+    #   ops_to_eval: A list of tensorflow operations that will be evaluated in
+    #     the tf.session.run() call.
+    #   batch_size (optional):  The batch_size to use
+    #   do_collect (optional): Should the routine collect all session.run
+    #     output as a list, and return it?
+    #   keep_prob (optional): The dropout keep probability.
+
+    # Returns:
+    #   A list of lists, the internal list is the return for the ops for each
+    #   session.run() call.  The outer list collects over the epoch.
+    # """
+    # hps = self.hps
+    # all_name_example_idx_pairs = self.shuffle_and_flatten_datasets(datasets, kind)
+
+    # kind_data = kind + '_data'
+    # kind_ext_input = kind + '_ext_input'
+
+    # total_cost = total_recon_cost = total_kl_cost = 0.0
+    # session = tf.get_default_session()
+    # epoch_size = len(all_name_example_idx_pairs)
+    # evaled_ops_list = []
+    # for name, example_idxs in all_name_example_idx_pairs:
+    #   data_dict = datasets[name]
+    #   data_extxd = data_dict[kind_data]
+    #   if hps.output_dist == 'poisson' and hps.temporal_spike_jitter_width > 0:
+    #     data_extxd = self.shuffle_spikes_in_time(data_extxd)
+
+    #   ext_input_extxi = data_dict[kind_ext_input]
+    #   data_bxtxd, ext_input_bxtxi = self.get_batch(data_extxd, ext_input_extxi,example_idxs=example_idxs)
+
+    #   feed_dict = self.build_feed_dict(name, data_bxtxd, ext_input_bxtxi, keep_prob=keep_prob)
+    #   evaled_ops_np = session.run(ops_to_eval, feed_dict=feed_dict)
+    #   if do_collect:
+    #     evaled_ops_list.append(evaled_ops_np)
+
+    # return evaled_ops_list
+
+  # def train_model(self, datasets):
+  #   """Train the model, print per-epoch information, and save checkpoints.
+
+  #   Loop over training epochs. The function that actually does the
+  #   training is train_epoch.  This function iterates over the training
+  #   data, one epoch at a time.  The learning rate schedule is such
+  #   that it will stay the same until the cost goes up in comparison to
+  #   the last few values, then it will drop.
+
+  #   Args:
+  #     datasets: A dict of data dicts.  The dataset dict is simply a
+  #       name(string)-> data dictionary mapping (See top of lfads.py).
+  #   """
+  #   hps = self.hps
+  #   has_any_valid_set = False
+  #   for data_dict in datasets.values():
+  #     if data_dict['valid_data'] is not None:
+  #       has_any_valid_set = True
+  #       break
+
+  #   session = tf.get_default_session()
+  #   lr = session.run(self.learning_rate)
+  #   lr_stop = hps.learning_rate_stop
+  #   i = -1
+  #   train_costs = []
+  #   valid_costs = []
+  #   ev_total_cost = ev_recon_cost = ev_kl_cost = 0.0
+  #   lowest_ev_cost = np.Inf
+  #   while True:
+  #     i += 1
+  #     do_save_ckpt = True if i % 10 ==0 else False
+  #     tr_total_cost, tr_recon_cost, tr_kl_cost, kl_weight, l2_cost, l2_weight = \
+  #               self.train_epoch(datasets, do_save_ckpt=do_save_ckpt)
+
+  #     # Evaluate the validation cost, and potentially save.  Note that this
+  #     # routine will not save a validation checkpoint until the kl weight and
+  #     # l2 weights are equal to 1.0.
+  #     if has_any_valid_set:
+  #       ev_total_cost, ev_recon_cost, ev_kl_cost = \
+  #           self.eval_cost_epoch(datasets, kind='valid')
+  #       valid_costs.append(ev_total_cost)
+
+  #       # > 1 may give more consistent results, but not the actual lowest vae.
+  #       # == 1 gives the lowest vae seen so far.
+  #       n_lve = 1
+  #       run_avg_lve = np.mean(valid_costs[-n_lve:])
+
+  #       # conditions for saving checkpoints:
+  #       #   KL weight must have finished stepping (>=1.0), AND
+  #       #   L2 weight must have finished stepping OR L2 is not being used, AND
+  #       #   the current run has a lower LVE than previous runs AND
+  #       #     len(valid_costs > n_lve) (not sure what that does)
+  #       if kl_weight >= 1.0 and \
+  #         (l2_weight >= 1.0 or \
+  #          (self.hps.l2_gen_scale == 0.0 and self.hps.l2_con_scale == 0.0)) \
+  #          and (len(valid_costs) > n_lve and run_avg_lve < lowest_ev_cost):
+
+  #         lowest_ev_cost = run_avg_lve
+  #         checkpoint_path = os.path.join(self.hps.lfads_save_dir,
+  #                                        self.hps.checkpoint_name + '_lve.ckpt')
+  #         self.lve_saver.save(session, checkpoint_path,
+  #                             global_step=self.train_step,
+  #                             latest_filename='checkpoint_lve')
+
+  #     # Plot and summarize.
+  #     values = {'nepochs':i, 'has_any_valid_set': has_any_valid_set,
+  #               'tr_total_cost':tr_total_cost, 'ev_total_cost':ev_total_cost,
+  #               'tr_recon_cost':tr_recon_cost, 'ev_recon_cost':ev_recon_cost,
+  #               'tr_kl_cost':tr_kl_cost, 'ev_kl_cost':ev_kl_cost,
+  #               'l2_weight':l2_weight, 'kl_weight':kl_weight,
+  #               'l2_cost':l2_cost}
+  #     self.summarize_all(datasets, values)
+  #     self.plot_single_example(datasets)
+
+  #     # Manage learning rate.
+  #     train_res = tr_total_cost
+  #     n_lr = hps.learning_rate_n_to_compare
+  #     if len(train_costs) > n_lr and train_res > np.max(train_costs[-n_lr:]):
+  #       _ = session.run(self.learning_rate_decay_op)
+  #       lr = session.run(self.learning_rate)
+  #       print("     Decreasing learning rate to %f." % lr)
+  #       # Force the system to run n_lr times while at this lr.
+  #       train_costs.append(np.inf)
+  #     else:
+  #       train_costs.append(train_res)
+
+  #     if lr < lr_stop:
+  #       print("Stopping optimization based on learning rate criteria.")
+  #       break
+
+    # def eval_cost_epoch(self, datasets, kind='train', ext_input_extxi=None,batch_size=None):
+  #   """Evaluate the cost of the epoch.
+
+  #   Args:
+  #     data_dict: The dictionary of data (training and validation) used for
+  #       training and evaluation of the model, respectively.
+
+  #   Returns:
+  #     a 3 tuple of costs:
+  #       (epoch total cost, epoch reconstruction cost, epoch KL cost)
+  #   """
+  #   ops_to_eval = [self.cost, self.recon_cost, self.kl_cost]
+  #   collected_op_values = self.run_epoch(datasets, ops_to_eval, kind=kind,
+  #                                        keep_prob=1.0)
+
+  #   total_cost = total_recon_cost = total_kl_cost = 0.0
+  #   # normalizing by batch done in distributions.py
+  #   epoch_size = len(collected_op_values)
+  #   for op_values in collected_op_values:
+  #     total_cost += op_values[0]
+  #     total_recon_cost += op_values[1]
+  #     total_kl_cost += op_values[2]
+
+  #   epoch_total_cost = total_cost / epoch_size
+  #   epoch_recon_cost = total_recon_cost / epoch_size
+  #   epoch_kl_cost = total_kl_cost / epoch_size
+
+  #   return epoch_total_cost, epoch_recon_cost, epoch_kl_cost

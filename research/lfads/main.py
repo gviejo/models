@@ -24,193 +24,270 @@ import tensorflow as tf
 import re
 import utils
 import sys
+import h5py
 from functions import *
 
-MAX_INT = sys.maxsize
+hps = hps_dict_to_obj({
+    "data_dir":                     '/tmp/rnn_synth_data_v1.0/',        #"Data for training"    
+    "data_filename_stem":           'chaotic_rnn_no_inputs',            #"Filename stem for data dictionaries."    
+    "lfads_save_dir":               '/tmp/lfads_chaotic_rnn_no_inputs', #"model save dir"    
+    "kind":                         "train",      #"Type of model to build {train, posterior_sample_and_average, posterior_push_mean, prior_sample, write_model_params"    
+    "output_dist":                  'poisson',    #"Type of output distribution, 'poisson' or 'gaussian'"  
+    "allow_gpu_growth":             False,        #"If true, only allocate amount of memory needed for Session. Otherwise, use full GPU memory."    
+    "checkpoint_pb_load_name":      'checkpoint', #"Name of checkpoint files, use 'checkpoint_lve' for best error" 
+    "checkpoint_name":              'lfads_vae',  #"Name of checkpoint files (.ckpt appended)" 
+    "output_filename_stem":         '',           #"Name of output file (postfix will be added)"   
+    "device":                       'gpu:0',      #"Which device to use (default: \"gpu:0\", can also be \"cpu:0\", \"gpu:1\", etc)"   
+    "csv_log":                      'fitlog',     #"Name of file to keep running log of fit likelihoods, etc (.csv appended)"  
+    "max_ckpt_to_keep":             5,            #"Max # of checkpoints to keep (rolling)" 
+    "ps_nexamples_to_process":      sys.maxsize,  #"Number of examples to process for posterior sample and average (not number of samples to average over)."    
+    "max_ckpt_to_keep_lve":         5,            #"Max # of checkpoints to keep for lowest validation error models (rolling)"  
+    "ext_input_dim":                0,            #"Dimension of external inputs"   
+    "num_steps_for_gen_ic":         sys.maxsize,  #"Number of steps to train the generator initial conditon."   
+    "inject_ext_input_to_gen":      False,        #"Should observed inputs be input to model via encoders, or injected directly into generator?"    
+    "cell_weight_scale":            1.0,          #"Input scaling for input weights in generator."    
+    "ic_dim":                       64,           #"Dimension of h0"    
+    "factors_dim":                  50,           #"Number of factors from generator"   
+    "ic_enc_dim":                   128,          #"Cell hidden size, encoder of h0"    
+    "gen_dim":                      200,          #"Cell hidden size, generator."   
+    "gen_cell_input_weight_scale":  1.0,          #"Input scaling for input weights in generator."    
+    "gen_cell_rec_weight_scale":    1.0,          #"Input scaling for rec weights in generator."  
+    "ic_prior_var_min":             0.1,          #"Minimum variance in posterior h0 codes."  
+    "ic_prior_var_scale":           0.1,          #"Variance of ic prior distribution"    
+    "ic_prior_var_max":             0.1,          #"Maximum variance of IC prior distribution."   
+    "ic_post_var_min":              0.0001,       #"Minimum variance of IC posterior distribution."   
+    "co_prior_var_scale":           0.1,          #"Variance of control input prior distribution."    
+    "prior_ar_atau":                10.0,         #"Initial autocorrelation of AR(1) priors." 
+    "prior_ar_nvar":                0.1,          #"Initial noise variance for AR(1) priors." 
+    "do_train_prior_ar_atau":       True,         #"Is the value for atau an init: or the constant value?"  
+    "do_train_prior_ar_nvar":       True,         #"Is the value for noise variance an init, or the constant value?"    
+    "co_dim":                       1,            #"Number of control net outputs (>0 builds that graph)."  
+    "do_causal_controller":         False,        #"Restrict the controller create only causal inferred inputs?"    
+    "do_feed_factors_to_controller": True,        #"Should factors[t-1] be input to controller at time t?"  
+    "feedback_factors_or_rates":    'factors',    #"Feedback the factors or the rates to the controller? Acceptable values: 'factors' or 'rates'." 
+    "controller_input_lag":         1,            #"Time lag on the encoding to controller t-lag for forward, t+lag for reverse."   
+    "ci_enc_dim":                   128,          #"Cell hidden size: encoder of control inputs"    
+    "con_dim":                      128,          #"Cell hidden size, controller"   
+    "batch_size":                   5,            #"Batch size to use during training." 
+    "learning_rate_init":           0.01,         #"Learning rate initial value"  
+    "learning_rate_decay_factor":   0.95,         #"Learning rate decay, decay by this fraction every so often."  
+    "learning_rate_stop":           0.005,        #"The lr is adaptively reduced, stop training at this value."   
+    "learning_rate_n_to_compare":   2,            #"Number of previous costs current cost has to be worse than, to lower learning rate."    
+    "max_grad_norm":                200.0,        #"Max norm of gradient before clipping."    
+    "cell_clip_value":              5.0,          #"Max value recurrent cell can take before being clipped."  
+    "do_train_io_only":             False,        #"Train only the input (readin) and output (readout) affine functions."   
+    "do_train_encoder_only":        False,        #"Train only the encoder weights."    
+    "do_reset_learning_rate":       False,        #"Reset the learning rate to initial value."  
+    "do_train_readin":              True,         #"Whether to train the readin matrices and bias vectors. False leaves them fixed at their initial values specified by the alignment matrices and vectors."    
+    "keep_prob":                    0.95,         #"Dropout keep probability."    
+    "temporal_spike_jitter_width":  0,            #"Shuffle spikes around this window." 
+    "l2_gen_scale":                 2000.0,       #"L2 regularization cost for the generator only."   
+    "l2_con_scale":                 0.0,          #"L2 regularization cost for the controller only."  
+    "co_mean_corr_scale":           0.0,          #"Cost of correlation (thru time)in the means of controller output."    
+    "kl_ic_weight":                 1.0,          #"Strength of KL weight on initial conditions KL penatly."  
+    "kl_co_weight":                 1.0,          #"Strength of KL weight on controller output KL penalty."   
+    "kl_start_step":                0,            #"Start increasing weight after this many steps." 
+    "kl_increase_steps":            2000,         #"Increase weight of kl cost to avoid local minimum." 
+    "l2_start_step":                0,            #"Start increasing l2 weight after this many steps."  
+    "l2_increase_steps":            2000,         #"Increase weight of l2 cost to avoid local minimum." 
+})
 
-# Lots of hyperparameters, but most are pretty insensitive.  The
-# explanation of these hyperparameters is found below, in the flags
-# session.
+#####################################################################################
+# load_datasets
+#####################################################################################
+fnames = os.listdir(hps.data_dir)
 
-CHECKPOINT_PB_LOAD_NAME = "checkpoint"
-CHECKPOINT_NAME = "lfads_vae"
-CSV_LOG = "fitlog"
-OUTPUT_FILENAME_STEM = ""
-DEVICE = "gpu:0" # "cpu:0", or other gpus, e.g. "gpu:1"
-MAX_CKPT_TO_KEEP = 5
-MAX_CKPT_TO_KEEP_LVE = 5
-PS_NEXAMPLES_TO_PROCESS = MAX_INT # if larger than number of examples, process all
-EXT_INPUT_DIM = 0
-IC_DIM = 64
-FACTORS_DIM = 20
-IC_ENC_DIM = 128
-GEN_DIM = 200
-GEN_CELL_INPUT_WEIGHT_SCALE = 1.0
-GEN_CELL_REC_WEIGHT_SCALE = 1.0
-CELL_WEIGHT_SCALE = 1.0
-BATCH_SIZE = 128
-LEARNING_RATE_INIT = 0.01
-LEARNING_RATE_DECAY_FACTOR = 0.5
-LEARNING_RATE_STOP = 0.005
-LEARNING_RATE_N_TO_COMPARE = 1
-INJECT_EXT_INPUT_TO_GEN = False
-DO_TRAIN_IO_ONLY = False
-DO_TRAIN_ENCODER_ONLY = False
-DO_RESET_LEARNING_RATE = False
-FEEDBACK_FACTORS_OR_RATES = "factors"
-DO_TRAIN_READIN = True
-
-# Calibrated just above the average value for the rnn synthetic data.
-MAX_GRAD_NORM = 200.0
-CELL_CLIP_VALUE = 5.0
-KEEP_PROB = 0.95
-TEMPORAL_SPIKE_JITTER_WIDTH = 0
-OUTPUT_DISTRIBUTION = 'poisson' # 'poisson' or 'gaussian'
-NUM_STEPS_FOR_GEN_IC = MAX_INT # set to num_steps if greater than num_steps
-
-DATA_DIR = "/tmp/rnn_synth_data_v1.0/"
-DATA_FILENAME_STEM = "chaotic_rnn_no_inputs"
-LFADS_SAVE_DIR = "/tmp/lfads_chaotic_rnn_no_inputs/"
-CO_DIM = 0
-DO_CAUSAL_CONTROLLER = False
-DO_FEED_FACTORS_TO_CONTROLLER = True
-CONTROLLER_INPUT_LAG = 1
-PRIOR_AR_AUTOCORRELATION = 10.0
-PRIOR_AR_PROCESS_VAR = 0.1
-DO_TRAIN_PRIOR_AR_ATAU = True
-DO_TRAIN_PRIOR_AR_NVAR = True
-CI_ENC_DIM = 128
-CON_DIM = 128
-CO_PRIOR_VAR_SCALE = 0.1
-KL_INCREASE_STEPS = 2000
-L2_INCREASE_STEPS = 2000
-L2_GEN_SCALE = 2000.0
-L2_CON_SCALE = 0.0
-# scale of regularizer on time correlation of inferred inputs
-CO_MEAN_CORR_SCALE = 0.0
-KL_IC_WEIGHT = 1.0
-KL_CO_WEIGHT = 1.0
-KL_START_STEP = 0
-L2_START_STEP = 0
-IC_PRIOR_VAR_MIN = 0.1
-IC_PRIOR_VAR_SCALE = 0.1
-IC_PRIOR_VAR_MAX = 0.1
-IC_POST_VAR_MIN = 0.0001      # protection from KL blowing up
-
-flags = tf.app.flags
-flags.DEFINE_string("kind",                     "train", "Type of model to build {train, posterior_sample_and_average, posterior_push_mean, prior_sample, write_model_params")
-flags.DEFINE_string("output_dist",              OUTPUT_DISTRIBUTION, "Type of output distribution, 'poisson' or 'gaussian'")
-flags.DEFINE_boolean("allow_gpu_growth",        False, "If true, only allocate amount of memory needed for Session. Otherwise, use full GPU memory.")
-flags.DEFINE_string("data_dir",                 DATA_DIR, "Data for training")
-flags.DEFINE_string("data_filename_stem",       DATA_FILENAME_STEM, "Filename stem for data dictionaries.")
-flags.DEFINE_string("lfads_save_dir",           LFADS_SAVE_DIR, "model save dir")
-flags.DEFINE_string("checkpoint_pb_load_name",  CHECKPOINT_PB_LOAD_NAME, "Name of checkpoint files, use 'checkpoint_lve' for best error")
-flags.DEFINE_string("checkpoint_name",          CHECKPOINT_NAME, "Name of checkpoint files (.ckpt appended)")
-flags.DEFINE_string("output_filename_stem",     OUTPUT_FILENAME_STEM, "Name of output file (postfix will be added)")
-flags.DEFINE_string("device",                   DEVICE, "Which device to use (default: \"gpu:0\", can also be \"cpu:0\", \"gpu:1\", etc)")
-flags.DEFINE_string("csv_log",                  CSV_LOG, "Name of file to keep running log of fit likelihoods, etc (.csv appended)")
-flags.DEFINE_integer("max_ckpt_to_keep",        MAX_CKPT_TO_KEEP, "Max # of checkpoints to keep (rolling)")
-flags.DEFINE_integer("ps_nexamples_to_process", PS_NEXAMPLES_TO_PROCESS, "Number of examples to process for posterior sample and average (not number of samples to average over).")
-flags.DEFINE_integer("max_ckpt_to_keep_lve",    MAX_CKPT_TO_KEEP_LVE, "Max # of checkpoints to keep for lowest validation error models (rolling)")
-flags.DEFINE_integer("ext_input_dim",           EXT_INPUT_DIM, "Dimension of external inputs")
-flags.DEFINE_integer("num_steps_for_gen_ic",    NUM_STEPS_FOR_GEN_IC, "Number of steps to train the generator initial conditon.")
-flags.DEFINE_boolean("inject_ext_input_to_gen", INJECT_EXT_INPUT_TO_GEN, "Should observed inputs be input to model via encoders, or injected directly into generator?")
-flags.DEFINE_float("cell_weight_scale",         CELL_WEIGHT_SCALE, "Input scaling for input weights in generator.")
-flags.DEFINE_integer("ic_dim",                  IC_DIM, "Dimension of h0")
-flags.DEFINE_integer("factors_dim",             FACTORS_DIM, "Number of factors from generator")
-flags.DEFINE_integer("ic_enc_dim",              IC_ENC_DIM, "Cell hidden size, encoder of h0")
-flags.DEFINE_integer("gen_dim",                 GEN_DIM, "Cell hidden size, generator.")
-flags.DEFINE_float("gen_cell_input_weight_scale", GEN_CELL_INPUT_WEIGHT_SCALE, "Input scaling for input weights in generator.")
-flags.DEFINE_float("gen_cell_rec_weight_scale", GEN_CELL_REC_WEIGHT_SCALE, "Input scaling for rec weights in generator.")
-flags.DEFINE_float("ic_prior_var_min",          IC_PRIOR_VAR_MIN, "Minimum variance in posterior h0 codes.")
-flags.DEFINE_float("ic_prior_var_scale",        IC_PRIOR_VAR_SCALE, "Variance of ic prior distribution")
-flags.DEFINE_float("ic_prior_var_max",          IC_PRIOR_VAR_MAX, "Maximum variance of IC prior distribution.")
-flags.DEFINE_float("ic_post_var_min",           IC_POST_VAR_MIN, "Minimum variance of IC posterior distribution.")
-flags.DEFINE_float("co_prior_var_scale",        CO_PRIOR_VAR_SCALE, "Variance of control input prior distribution.")
-flags.DEFINE_float("prior_ar_atau",             PRIOR_AR_AUTOCORRELATION, "Initial autocorrelation of AR(1) priors.")
-flags.DEFINE_float("prior_ar_nvar",             PRIOR_AR_PROCESS_VAR, "Initial noise variance for AR(1) priors.")
-flags.DEFINE_boolean("do_train_prior_ar_atau",  DO_TRAIN_PRIOR_AR_ATAU, "Is the value for atau an init, or the constant value?")
-flags.DEFINE_boolean("do_train_prior_ar_nvar",  DO_TRAIN_PRIOR_AR_NVAR, "Is the value for noise variance an init, or the constant value?")
-flags.DEFINE_integer("co_dim",                  CO_DIM, "Number of control net outputs (>0 builds that graph).")
-flags.DEFINE_boolean("do_causal_controller",    DO_CAUSAL_CONTROLLER, "Restrict the controller create only causal inferred inputs?")
-flags.DEFINE_boolean("do_feed_factors_to_controller", DO_FEED_FACTORS_TO_CONTROLLER, "Should factors[t-1] be input to controller at time t?")
-flags.DEFINE_string("feedback_factors_or_rates", FEEDBACK_FACTORS_OR_RATES, "Feedback the factors or the rates to the controller? Acceptable values: 'factors' or 'rates'.")
-flags.DEFINE_integer("controller_input_lag",    CONTROLLER_INPUT_LAG, "Time lag on the encoding to controller t-lag for forward, t+lag for reverse.")
-flags.DEFINE_integer("ci_enc_dim",              CI_ENC_DIM, "Cell hidden size, encoder of control inputs")
-flags.DEFINE_integer("con_dim",                 CON_DIM, "Cell hidden size, controller")
-flags.DEFINE_integer("batch_size",              BATCH_SIZE, "Batch size to use during training.")
-flags.DEFINE_float("learning_rate_init",        LEARNING_RATE_INIT, "Learning rate initial value")
-flags.DEFINE_float("learning_rate_decay_factor", LEARNING_RATE_DECAY_FACTOR, "Learning rate decay, decay by this fraction every so often.")
-flags.DEFINE_float("learning_rate_stop",        LEARNING_RATE_STOP, "The lr is adaptively reduced, stop training at this value.")
-flags.DEFINE_integer("learning_rate_n_to_compare", LEARNING_RATE_N_TO_COMPARE, "Number of previous costs current cost has to be worse than, to lower learning rate.")
-flags.DEFINE_float("max_grad_norm",             MAX_GRAD_NORM, "Max norm of gradient before clipping.")
-flags.DEFINE_float("cell_clip_value",           CELL_CLIP_VALUE, "Max value recurrent cell can take before being clipped.")
-flags.DEFINE_boolean("do_train_io_only",        DO_TRAIN_IO_ONLY, "Train only the input (readin) and output (readout) affine functions.")
-flags.DEFINE_boolean("do_train_encoder_only",   DO_TRAIN_ENCODER_ONLY, "Train only the encoder weights.")
-flags.DEFINE_boolean("do_reset_learning_rate",  DO_RESET_LEARNING_RATE, "Reset the learning rate to initial value.")
-flags.DEFINE_boolean("do_train_readin",         DO_TRAIN_READIN, "Whether to train the readin matrices and bias vectors. False leaves them fixed at their initial values specified by the alignment matrices and vectors.")
-flags.DEFINE_float("keep_prob",                 KEEP_PROB, "Dropout keep probability.")
-flags.DEFINE_integer("temporal_spike_jitter_width", TEMPORAL_SPIKE_JITTER_WIDTH, "Shuffle spikes around this window.")
-flags.DEFINE_float("l2_gen_scale",              L2_GEN_SCALE, "L2 regularization cost for the generator only.")
-flags.DEFINE_float("l2_con_scale",              L2_CON_SCALE, "L2 regularization cost for the controller only.")
-flags.DEFINE_float("co_mean_corr_scale",        CO_MEAN_CORR_SCALE, "Cost of correlation (thru time)in the means of controller output.")
-flags.DEFINE_float("kl_ic_weight",              KL_IC_WEIGHT, "Strength of KL weight on initial conditions KL penatly.")
-flags.DEFINE_float("kl_co_weight",              KL_CO_WEIGHT, "Strength of KL weight on controller output KL penalty.")
-flags.DEFINE_integer("kl_start_step",           KL_START_STEP, "Start increasing weight after this many steps.")
-flags.DEFINE_integer("kl_increase_steps",       KL_INCREASE_STEPS, "Increase weight of kl cost to avoid local minimum.")
-flags.DEFINE_integer("l2_start_step",           L2_START_STEP, "Start increasing l2 weight after this many steps.")
-flags.DEFINE_integer("l2_increase_steps",       L2_INCREASE_STEPS, "Increase weight of l2 cost to avoid local minimum.")
-
-FLAGS = flags.FLAGS
+datasets = {}
+  
+for fname in fnames:
+    if fname.startswith(hps.data_filename_stem):
+        with h5py.File(os.path.join(hps.data_dir,fname), 'r') as hf:
+            data_dict = {k: np.array(v) for k, v in hf.items()}
+        
+        idx = len(hps.data_filename_stem) + 1
+        key = fname[idx:]
+        data_dict['data_dim'] = data_dict['train_data'].shape[2]
+        data_dict['num_steps'] = data_dict['train_data'].shape[1]        
+        # clean data_dict
+        for k in ['train_truth', 'train_ext_input', 'valid_data','valid_truth', 'valid_ext_input', 'valid_train']:
+            if k not in data_dict:
+                data_dict[k] = None                
+        datasets[key] = data_dict
 
 
-"""Get this whole shindig off the ground."""
-d = build_hyperparameter_dict(FLAGS)
-hps = hps_dict_to_obj(d)    # hyper parameters
-kind = FLAGS.kind
-
-# Read the data, if necessary.
-train_set = valid_set = None
-if kind in ["train", "posterior_sample_and_average", "posterior_push_mean",
-    "prior_sample", "write_model_params"]:
-    datasets = load_datasets(hps.data_dir, hps.data_filename_stem)
-else:
-    raise ValueError('Kind {} is not supported.'.format(kind))
-
-# infer the dataset names and dataset dimensions from the loaded files
-hps.kind = kind     # needs to be added here, cuz not saved as hyperparam
-hps.dataset_names = []
-hps.dataset_dims = {}
-for key in datasets:
-    hps.dataset_names.append(key)
-    hps.dataset_dims[key] = datasets[key]['data_dim']
-
+hps.dataset_names = list(datasets.keys())
+hps.dataset_dims = {k:datasets[k]['data_dim'] for k in datasets}
 hps.num_steps = datasets[list(datasets.keys())[0]]['num_steps']
 hps.ndatasets = len(hps.dataset_names)
+has_any_valid_set = True
 
-sys.exit()
 
 if hps.num_steps_for_gen_ic > hps.num_steps: hps.num_steps_for_gen_ic = hps.num_steps
 
-# Build and run the model, for varying purposes.
 config = tf.ConfigProto(allow_soft_placement=True, log_device_placement=False)
 
-# sys.exit()
-# TRAINING
+#####################################################################################
+# train
+#####################################################################################
 with tf.Session(config=config).as_default():
-    #BUILDING MODEL
+    # with tf.device(hps.device)
+    #####################################################################################
+    # build_model(hps, kind='train', datasets = datasets)
+    #####################################################################################
     with tf.variable_scope("LFADS", reuse=None):
-        model = LFADS(hps, kind='train', datasets=datasets)
-
+        model = LFADS(hps, kind='train', datasets=datasets) 
+    
     session = tf.get_default_session()
     tf.global_variables_initializer().run()
-    
     session.run(model.learning_rate.initializer)
 
-    #TRAINING MODEL
-    model.train_model(datasets)
+    #####################################################################################
+    # model.train_model(datasets)
+    #####################################################################################
+    
+    lr = session.run(model.learning_rate)
+    lr_stop = hps.learning_rate_stop
+    
+    train_costs = []
+    valid_costs = []
+    learning_rates = []        
+    
+    for i in range(20):        
+        learning_rates.append(lr)
+        #####################################################################################          
+        # self.train_epochs(datasets, do_save_ckpt=do_save_ckpt)
+        #####################################################################################
+        ops_to_eval = [model.cost, model.recon_cost, model.kl_cost, model.kl_weight, model.l2_cost, model.l2_weight, model.train_op]
+
+        #####################################################################################
+        # self.run_epochs(datasets, ops_to_eval, kind="train")
+        #####################################################################################
+        all_name_example_idx_pairs = model.shuffle_and_flatten_datasets(datasets, hps.kind)        
+        collected_op_values = np.zeros((6,len(all_name_example_idx_pairs)))
+        for j, (name, example_idxs) in enumerate(all_name_example_idx_pairs):
+            data_dict = datasets[name]
+            data_bxtxd, ext_input_bxtxi = model.get_batch(data_dict['train_data'], data_dict['train_ext_input'],example_idxs=example_idxs)
+            feed_dict = model.build_feed_dict(name, data_bxtxd, ext_input_bxtxi, keep_prob=None)
+            evaled_ops_np = session.run(ops_to_eval, feed_dict=feed_dict)            
+            collected_op_values[:,j] = np.array(evaled_ops_np[0:6])
+        #####################################################################################
+        
+        mean_cost = collected_op_values.mean(1)
+        tr_total_cost = mean_cost[0]
+        tr_recon_cost = mean_cost[1]
+        tr_kl_cost = mean_cost[2]
+        kl_weight = collected_op_values[3,-1]
+        l2_cost = collected_op_values[4,-1]
+        l2_weight = collected_op_values[5,-1]
+        #####################################################################################
+
+        #####################################################################################
+        # self.eval_cost_epoch(datasets, kind='valid')
+        #####################################################################################
+        ops_to_eval = [model.cost, model.recon_cost, model.kl_cost]
+
+        #####################################################################################
+        # self.run_epochs(datasets, ops_to_eval, kind="valid", keep_prob = 1.0)
+        #####################################################################################
+        all_name_example_idx_pairs = model.shuffle_and_flatten_datasets(datasets, 'valid')
+        collected_op_values = np.zeros((3,len(all_name_example_idx_pairs)))
+        for j, (name, example_idxs) in enumerate(all_name_example_idx_pairs):
+            data_dict = datasets[name]
+            data_bxtxd, ext_input_bxtxi = model.get_batch(data_dict['valid_data'], data_dict['valid_ext_input'],example_idxs=example_idxs)
+            feed_dict = model.build_feed_dict(name, data_bxtxd, ext_input_bxtxi, keep_prob=1.0)
+            evaled_ops_np = session.run(ops_to_eval, feed_dict=feed_dict)            
+            collected_op_values[:,j] = np.array(evaled_ops_np[0:3])
+        #####################################################################################
+        
+        mean_cost = collected_op_values.mean(1)
+        ev_total_cost = mean_cost[0]
+        ev_recon_cost = mean_cost[1]
+        ev_kl_cost = mean_cost[2]
+        #####################################################################################
+
+        valid_costs.append(ev_total_cost)
+
+        # Manage learning rate.        
+        n_lr = hps.learning_rate_n_to_compare        
+        if len(train_costs) > n_lr and tr_total_cost > np.max(train_costs[-n_lr:]):            
+            lr = session.run(model.learning_rate_decay_op)            
+            print("     Decreasing learning rate to %f." % lr)
+            # Force the system to run n_lr times while at this lr.
+            train_costs.append(np.inf)
+        else:
+            train_costs.append(tr_total_cost)
+
+        if lr < lr_stop:
+            print("Stopping optimization based on learning rate criteria.")
+            break
+    #####################################################################################
 
 
+
+sys.exit()
+# POSTERIOR SAMPLE AND AVERAGE
+model.hps.kind = 'posterior_sample_and_average'
+
+
+    for data_name, data_dict in datasets.items():
+      data_tuple = [('train', data_dict['train_data'],
+                     data_dict['train_ext_input']),
+                    ('valid', data_dict['valid_data'],
+                     data_dict['valid_ext_input'])]
+      for data_kind, data_extxd, ext_input_extxi in data_tuple:
+        if not output_fname:
+          fname = "model_runs_" + data_name + '_' + data_kind + '_' + kind
+        else:
+          fname = output_fname + data_name + '_' + data_kind + '_' + kind
+
+        print("Writing data for %s data and kind %s." % (data_name, data_kind))
+        if push_mean:
+          model_runs = self.eval_model_runs_push_mean(data_name, data_extxd,
+                                                      ext_input_extxi)
+        else:
+          model_runs = self.eval_model_runs_avg_epoch(data_name, data_extxd,
+                                                      ext_input_extxi)
+        full_fname = os.path.join(hps.lfads_save_dir, fname)
+        write_data(full_fname, model_runs, compression='gzip')
+        print("Done.")
+
+
+model.write_model_runs(datasets)
+
+def write_model_runs(hps, datasets, output_fname=None, push_mean=False):
+  """Run the model on the data in data_dict, and save the computed values.
+
+  LFADS generates a number of outputs for each examples, and these are all
+  saved.  They are:
+    The mean and variance of the prior of g0.
+    The mean and variance of approximate posterior of g0.
+    The control inputs (if enabled)
+    The initial conditions, g0, for all examples.
+    The generator states for all time.
+    The factors for all time.
+    The rates for all time.
+
+  Args:
+    hps: The dictionary of hyperparameters.
+    datasets: A dictionary of data dictionaries.  The dataset dict is simply a
+      name(string)-> data dictionary mapping (See top of lfads.py).
+    output_fname (optional): output filename stem to write the model runs.
+    push_mean: if False (default), generates batch_size samples for each trial
+      and averages the results. if True, runs each trial once without noise,
+      pushing the posterior mean initial conditions and control inputs through
+      the trained model. False is used for posterior_sample_and_average, True
+      is used for posterior_push_mean.
+  """
+  model = build_model(hps, kind=hps.kind, datasets=datasets)
+  model.write_model_runs(datasets, output_fname, push_mean)
+
+
+
+# POSTERIOR PUSH MEAN
+
+# PRIOR SAMPLE
+
+# WRITE MODEL PARAMS
 
 
 # with sess.as_default():

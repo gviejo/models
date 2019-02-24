@@ -78,7 +78,7 @@ nreplications = FLAGS.nreplications
 E = nreplications * C         # total number of trials
 # S is the number of measurements in each datasets, w/ each
 # dataset having a different set of observations.
-ndatasets = N/S                 # ok if rounded down
+ndatasets = int(N/S)                 # ok if rounded down
 train_percentage = FLAGS.train_percentage
 ntime_steps = int(T / FLAGS.dt)
 # End of user parameters

@@ -46,10 +46,10 @@ GEN_DIM = 200
 GEN_CELL_INPUT_WEIGHT_SCALE = 1.0
 GEN_CELL_REC_WEIGHT_SCALE = 1.0
 CELL_WEIGHT_SCALE = 1.0
-BATCH_SIZE = 128
+BATCH_SIZE = 5
 LEARNING_RATE_INIT = 0.01
-LEARNING_RATE_DECAY_FACTOR = 0.95
-LEARNING_RATE_STOP = 0.00001
+LEARNING_RATE_DECAY_FACTOR = 0.5
+LEARNING_RATE_STOP = 0.001
 LEARNING_RATE_N_TO_COMPARE = 6
 INJECT_EXT_INPUT_TO_GEN = False
 DO_TRAIN_IO_ONLY = False
@@ -665,7 +665,7 @@ def write_model_samples(hps, datasets, dataset_name=None, output_fname=None):
   else:
     output_fname = output_fname + "model_runs_" + hps.kind
   if not dataset_name:
-    dataset_name = datasets.keys()[0]
+    dataset_name = list(datasets.keys())[0]
   else:
     if dataset_name not in datasets.keys():
       raise ValueError("Invalid dataset name '%s'."%(dataset_name))
@@ -780,7 +780,7 @@ def main(_):
 
   # also store down the dimensionality of the data
   # - just pull from one set, required to be same for all sets
-  hps.num_steps = datasets.values()[0]['num_steps']
+  hps.num_steps = datasets[list(datasets.keys())[0]]['num_steps']
   hps.ndatasets = len(hps.dataset_names)
 
   if hps.num_steps_for_gen_ic > hps.num_steps:
