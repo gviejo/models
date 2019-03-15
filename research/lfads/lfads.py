@@ -519,8 +519,7 @@ class LFADS(object):
       ext_input_do_bxtxi = None
 
     # ENCODERS
-    def encode_data(dataset_bxtxd, enc_cell, name, forward_or_reverse,
-                num_steps_to_encode):
+    def encode_data(dataset_bxtxd, enc_cell, name, forward_or_reverse, num_steps_to_encode):
       """Encode data for LFADS
       Args:
         dataset_bxtxd - the data to encode, as a 3 tensor, with dims

@@ -19,6 +19,8 @@ import h5py
 import numpy as np
 import os
 import tensorflow as tf         # used for flags here
+import sys
+sys.path.append("../")
 
 from utils import write_datasets
 from synthetic_data_utils import add_alignment_projections, generate_data
@@ -30,23 +32,22 @@ import matplotlib.pyplot as plt
 import scipy.signal
 
 matplotlib.rcParams['image.interpolation'] = 'nearest'
-DATA_DIR = "rnn_synth_data_v1.0"
 
 flags = tf.app.flags
-flags.DEFINE_string("save_dir", "/tmp/" + DATA_DIR + "/",
+flags.DEFINE_string("save_dir", "../data/",
                     "Directory for saving data.")
-flags.DEFINE_string("datafile_name", "thits_data",
+flags.DEFINE_string("datafile_name", "this_data",
                     "Name of data file for input case.")
 flags.DEFINE_string("noise_type", "poisson", "Noise type for data.")
 flags.DEFINE_integer("synth_data_seed", 5, "Random seed for RNN generation.")
-flags.DEFINE_float("T", 1.0, "Time in seconds to generate.")
-flags.DEFINE_integer("C", 100, "Number of conditions")
-flags.DEFINE_integer("N", 50, "Number of units for the RNN")
-flags.DEFINE_integer("S", 50, "Number of sampled units from RNN")
+flags.DEFINE_float("T", 2.0, "Time in seconds to generate.")
+flags.DEFINE_integer("C", 10, "Number of conditions")
+flags.DEFINE_integer("N", 30, "Number of units for the RNN")
+flags.DEFINE_integer("S", 30, "Number of sampled units from RNN")
 flags.DEFINE_integer("npcs", 10, "Number of PCS for multi-session case.")
 flags.DEFINE_float("train_percentage", 4.0/5.0,
                    "Percentage of train vs validation trials")
-flags.DEFINE_integer("nreplications", 40,
+flags.DEFINE_integer("nreplications", 2,
                      "Number of noise replications of the same underlying rates.")
 flags.DEFINE_float("g", 1.5, "Complexity of dynamics")
 flags.DEFINE_float("x0_std", 1.0,
