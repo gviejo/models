@@ -27,6 +27,7 @@ import sys
 import h5py
 from functions import *
 from time import time
+from utils import *
 
 hps = hps_dict_to_obj({
 	"data_dir":                     'data/',        #"Data for training"    
@@ -72,8 +73,8 @@ hps = hps_dict_to_obj({
 	"batch_size":                   5,            #"Batch size to use during training." 
 	"learning_rate_init":           0.01,         #"Learning rate initial value"  
 	"learning_rate_decay_factor":   0.95,         #"Learning rate decay, decay by this fraction every so often."  
-	"learning_rate_stop":           0.005,        #"The lr is adaptively reduced, stop training at this value."   
-	"learning_rate_n_to_compare":   2,            #"Number of previous costs current cost has to be worse than, to lower learning rate."    
+	"learning_rate_stop":           0.00005,        #"The lr is adaptively reduced, stop training at this value."   
+	"learning_rate_n_to_compare":   10,            #"Number of previous costs current cost has to be worse than, to lower learning rate."    
 	"max_grad_norm":                200.0,        #"Max norm of gradient before clipping."    
 	"cell_clip_value":              5.0,          #"Max value recurrent cell can take before being clipped."  
 	"do_train_io_only":             False,        #"Train only the input (readin) and output (readout) affine functions."   
@@ -126,11 +127,13 @@ has_any_valid_set = True
 
 if hps.num_steps_for_gen_ic > hps.num_steps: hps.num_steps_for_gen_ic = hps.num_steps
 
-#####################################################################################
-# train
-#####################################################################################
-with tf.Session(config=tf.ConfigProto(allow_soft_placement=True, log_device_placement=False)) as session:
+sys.exit()
 
+
+with tf.Session(config=tf.ConfigProto(allow_soft_placement=True, log_device_placement=False)) as session:
+	#####################################################################################
+	# train
+	#####################################################################################
 	#####################################################################################
 	# build_model(hps, kind='train', datasets = datasets)
 	#####################################################################################
@@ -214,151 +217,158 @@ with tf.Session(config=tf.ConfigProto(allow_soft_placement=True, log_device_plac
 			break
 	#####################################################################################
 
-print(time()-t1)
+	print("Training time %d seconds" % (time()-t1))
 
+	#######################################################################################
+	# POSTERIOR SAMPLE AND AVERAGE
+	# 	write_model_runs(write_model_runs(hps, datasets, hps.output_filename_stem, push_mean=False))
+	#			model.write_model_runs(datasets, output_fname, push_mean)
+	#######################################################################################
+	model.hps.kind = 'posterior_sample_and_average'
 
-sys.exit()
-#######################################################################################
-# POSTERIOR SAMPLE AND AVERAGE
-#
-# 	write_model_runs(write_model_runs(hps, datasets, hps.output_filename_stem, push_mean=False))
-#			model.write_model_runs(datasets, output_fname, push_mean)
-#######################################################################################
-model.hps.kind = 'posterior_sample_and_average'
+	samples = {}
 
-for data_name, data_dict in datasets.items():
-	data_tuple = [('train', data_dict['train_data'], data_dict['train_ext_input']), ('valid', data_dict['valid_data'], data_dict['valid_ext_input'])]
-	for data_kind, data_extxd, ext_input_extxi in data_tuple:
-		fname = "model_runs_" + data_name + '_' + data_kind + '_' + model.hps.kind
+	for data_name, data_dict in datasets.items():
+		samples[data_name] = {}
+		data_tuple = [('train', data_dict['train_data'], data_dict['train_ext_input']), ('valid', data_dict['valid_data'], data_dict['valid_ext_input'])]
+		for data_kind, data_extxd, ext_input_extxi in data_tuple:			
+			fname = "model_runs_" + data_name + '_' + data_kind + '_' + model.hps.kind
 
-		###############################################################################
-		# model.eval_model_runs_avg_epoch
-		###############################################################################		
-	    hps = self.hps
-	    batch_size = hps.batch_size
-	    E, T, D  = data_extxd.shape
-	    E_to_process = hps.ps_nexamples_to_process
-	    if E_to_process > E:
-	      E_to_process = E
+			###############################################################################
+			# model.eval_model_runs_avg_epoch
+			###############################################################################		
+			hps = model.hps
+			batch_size = hps.batch_size
+			E, T, D  = data_extxd.shape
+			E_to_process = np.minimum(hps.ps_nexamples_to_process, E)
 
-	    if hps.ic_dim > 0:
-	      prior_g0_mean = np.zeros([E_to_process, hps.ic_dim])
-	      prior_g0_logvar = np.zeros([E_to_process, hps.ic_dim])
-	      post_g0_mean = np.zeros([E_to_process, hps.ic_dim])
-	      post_g0_logvar = np.zeros([E_to_process, hps.ic_dim])
+			if hps.ic_dim > 0:
+				prior_g0_mean = np.zeros([E_to_process, hps.ic_dim])
+				prior_g0_logvar = np.zeros([E_to_process, hps.ic_dim])
+				post_g0_mean = np.zeros([E_to_process, hps.ic_dim])
+				post_g0_logvar = np.zeros([E_to_process, hps.ic_dim])
 
-	    if hps.co_dim > 0:
-	      controller_outputs = np.zeros([E_to_process, T, hps.co_dim])
-	    gen_ics = np.zeros([E_to_process, hps.gen_dim])
-	    gen_states = np.zeros([E_to_process, T, hps.gen_dim])
-	    factors = np.zeros([E_to_process, T, hps.factors_dim])
+			if hps.co_dim > 0:
+				controller_outputs = np.zeros([E_to_process, T, hps.co_dim])
 
-	    if hps.output_dist == 'poisson':
-	      out_dist_params = np.zeros([E_to_process, T, D])
-	    elif hps.output_dist == 'gaussian':
-	      out_dist_params = np.zeros([E_to_process, T, D+D])
-	    else:
-	      assert False, "NIY"
+			gen_ics = np.zeros([E_to_process, hps.gen_dim])
+			gen_states = np.zeros([E_to_process, T, hps.gen_dim])
+			factors = np.zeros([E_to_process, T, hps.factors_dim])
 
-	    costs = np.zeros(E_to_process)
-	    nll_bound_vaes = np.zeros(E_to_process)
-	    nll_bound_iwaes = np.zeros(E_to_process)
-	    train_steps = np.zeros(E_to_process)
-	    for es_idx in range(E_to_process):
-	      print("Running %d of %d." % (es_idx+1, E_to_process))
-	      example_idxs = es_idx * np.ones(batch_size, dtype=np.int32)
-	      data_bxtxd, ext_input_bxtxi = self.get_batch(data_extxd,
-	                                                   ext_input_extxi,
-	                                                   batch_size=batch_size,
-	                                                   example_idxs=example_idxs)
-	      model_values = self.eval_model_runs_batch(data_name, data_bxtxd,
-	                                                ext_input_bxtxi,
-	                                                do_eval_cost=True,
-	                                                do_average_batch=True)
+			if hps.output_dist == 'poisson':
+				out_dist_params = np.zeros([E_to_process, T, D])
+			elif hps.output_dist == 'gaussian':
+				out_dist_params = np.zeros([E_to_process, T, D+D])
+			else:
+				assert False, "NIY"
 
-	      if self.hps.ic_dim > 0:
-	        prior_g0_mean[es_idx,:] = model_values['prior_g0_mean']
-	        prior_g0_logvar[es_idx,:] = model_values['prior_g0_logvar']
-	        post_g0_mean[es_idx,:] = model_values['post_g0_mean']
-	        post_g0_logvar[es_idx,:] = model_values['post_g0_logvar']
-	      gen_ics[es_idx,:] = model_values['gen_ics']
+			costs = np.zeros(E_to_process)
+			nll_bound_vaes = np.zeros(E_to_process)
+			nll_bound_iwaes = np.zeros(E_to_process)
+			train_steps = np.zeros(E_to_process)
 
-	      if self.hps.co_dim > 0:
-	        controller_outputs[es_idx,:,:] = model_values['controller_outputs']
-	      gen_states[es_idx,:,:] = model_values['gen_states']
-	      factors[es_idx,:,:] = model_values['factors']
-	      out_dist_params[es_idx,:,:] = model_values['output_dist_params']
-	      costs[es_idx] = model_values['costs']
-	      nll_bound_vaes[es_idx] = model_values['nll_bound_vaes']
-	      nll_bound_iwaes[es_idx] = model_values['nll_bound_iwaes']
-	      train_steps[es_idx] = model_values['train_steps']
-	      print('bound nll(vae): %.3f, bound nll(iwae): %.3f' \
-	            % (nll_bound_vaes[es_idx], nll_bound_iwaes[es_idx]))
+			for es_idx in range(E_to_process):
+				print("Running %d of %d." % (es_idx+1, E_to_process))
+				example_idxs = es_idx * np.ones(batch_size, dtype=np.int32)
+				data_bxtxd, ext_input_bxtxi = model.get_batch(data_extxd, ext_input_extxi, batch_size=batch_size, example_idxs=example_idxs)
 
-	    model_runs = {}
-	    if self.hps.ic_dim > 0:
-	      model_runs['prior_g0_mean'] = prior_g0_mean
-	      model_runs['prior_g0_logvar'] = prior_g0_logvar
-	      model_runs['post_g0_mean'] = post_g0_mean
-	      model_runs['post_g0_logvar'] = post_g0_logvar
-	    model_runs['gen_ics'] = gen_ics
+				##############################################################################
+				# model_values = self.eval_model_runs_batch(data_name, data_bxtxd, ext_input_bxtxi, do_eval_cost=True, do_average_batch=True)
+				##############################################################################	
+				# if fewer than batch_size provided, pad to batch_size			
+				E, _, _ = data_bxtxd.shape
+				if E < hps.batch_size: 
+					data_bxtxd = np.pad(data_bxtxd, ((0, hps.batch_size-E), (0, 0), (0, 0)), mode='constant', constant_values=0)
+					if ext_input_bxtxi is not None:
+						ext_input_bxtxi = np.pad(ext_input_bxtxi, ((0, hps.batch_size-E), (0, 0), (0, 0)), mode='constant', constant_values=0)
 
-	    if self.hps.co_dim > 0:
-	      model_runs['controller_outputs'] = controller_outputs
-	    model_runs['gen_states'] = gen_states
-	    model_runs['factors'] = factors
-	    model_runs['output_dist_params'] = out_dist_params
-	    model_runs['costs'] = costs
-	    model_runs['nll_bound_vaes'] = nll_bound_vaes
-	    model_runs['nll_bound_iwaes'] = nll_bound_iwaes
-	    model_runs['train_steps'] = train_steps
-	    return model_runs
+				feed_dict = model.build_feed_dict(data_name, data_bxtxd, ext_input_bxtxi, keep_prob=1.0)
+
+				# Non-temporal signals will be batch x dim.
+				# Temporal signals are list length T with elements batch x dim.
+				tf_vals = [model.gen_ics, model.gen_states, model.factors, model.output_dist_params]
+				tf_vals.append(model.cost)
+				tf_vals.append(model.nll_bound_vae)
+				tf_vals.append(model.nll_bound_iwae)
+				tf_vals.append(model.train_step) # not train_op!
+				if model.hps.ic_dim > 0:
+					tf_vals += [model.prior_zs_g0.mean, 
+								model.prior_zs_g0.logvar, 
+								model.posterior_zs_g0.mean, 
+								model.posterior_zs_g0.logvar]
+				if model.hps.co_dim > 0:
+					tf_vals.append(model.controller_outputs)
+				tf_vals_flat, fidxs = flatten(tf_vals)
+
+				np_vals_flat = session.run(tf_vals_flat, feed_dict=feed_dict)				
+
+				# do average batch
+				gen_ics[es_idx]		= np.mean(np_vals_flat[0], 0) # assuming E > hps.batch_size
+				costs[es_idx] 		= np_vals_flat[fidxs[4][0]]
+				nll_bound_vaes[es_idx] = np_vals_flat[fidxs[5][0]]
+				nll_bound_iwaes[es_idx] = np_vals_flat[fidxs[6][0]]
+				train_steps[es_idx] = np_vals_flat[fidxs[7][0]]
+				gen_states[es_idx] 	= np.mean(list_t_bxn_to_tensor_bxtxn([np_vals_flat[f] for f in fidxs[1]]), 0)
+				factors[es_idx] 	= np.mean(list_t_bxn_to_tensor_bxtxn([np_vals_flat[f] for f in fidxs[2]]), 0)
+				out_dist_params[es_idx] = np.mean(list_t_bxn_to_tensor_bxtxn([np_vals_flat[f] for f in fidxs[3]]), 0)
+				if model.hps.ic_dim > 0:
+					prior_g0_mean[es_idx] 		= np.mean(np_vals_flat[fidxs[8][0]], 0)
+					prior_g0_logvar[es_idx] 	= np.mean(np_vals_flat[fidxs[9][0]], 0)
+					post_g0_mean[es_idx] 		= np.mean(np_vals_flat[fidxs[10][0]], 0)
+					post_g0_logvar[es_idx] 		= np.mean(np_vals_flat[fidxs[11][0]], 0)
+
+				if model.hps.co_dim > 0:
+					controller_outputs[es_idx] = np.mean(list_t_bxn_to_tensor_bxtxn([np_vals_flat[f] for f in fidxs[12]]), 0)
+
+				##############################################################################
+				print('bound nll(vae): %.3f, bound nll(iwae): %.3f' % (nll_bound_vaes[es_idx], nll_bound_iwaes[es_idx]))
+
+			model_runs = {}
+			if model.hps.ic_dim > 0:
+				model_runs['prior_g0_mean'] = prior_g0_mean
+				model_runs['prior_g0_logvar'] = prior_g0_logvar
+				model_runs['post_g0_mean'] = post_g0_mean
+				model_runs['post_g0_logvar'] = post_g0_logvar
+			model_runs['gen_ics'] = gen_ics
+
+			if model.hps.co_dim > 0:
+				model_runs['controller_outputs'] = controller_outputs
+			model_runs['gen_states'] = gen_states
+			model_runs['factors'] = factors
+			model_runs['output_dist_params'] = out_dist_params
+			model_runs['costs'] = costs
+			model_runs['nll_bound_vaes'] = nll_bound_vaes
+			model_runs['nll_bound_iwaes'] = nll_bound_iwaes
+			model_runs['train_steps'] = train_steps
 			
-
-		###############################################################################
-		full_fname = os.path.join(hps.lfads_save_dir, fname)
-		write_data(full_fname, model_runs, compression='gzip')
-		print("Done.")
-
-
-# model.write_model_runs(datasets)
-
-# def write_model_runs(hps, datasets, output_fname=None, push_mean=False):
-# 	"""Run the model on the data in data_dict, and save the computed values.
-
-# 	LFADS generates a number of outputs for each examples, and these are all
-# 	saved.  They are:
-# 	The mean and variance of the prior of g0.
-# 	The mean and variance of approximate posterior of g0.
-# 	The control inputs (if enabled)
-# 	The initial conditions, g0, for all examples.
-# 	The generator states for all time.
-# 	The factors for all time.
-# 	The rates for all time.
-
-# 	Args:
-# 	hps: The dictionary of hyperparameters.
-# 	datasets: A dictionary of data dictionaries.  The dataset dict is simply a
-# 	  name(string)-> data dictionary mapping (See top of lfads.py).
-# 	output_fname (optional): output filename stem to write the model runs.
-# 	push_mean: if False (default), generates batch_size samples for each trial
-# 	  and averages the results. if True, runs each trial once without noise,
-# 	  pushing the posterior mean initial conditions and control inputs through
-# 	  the trained model. False is used for posterior_sample_and_average, True
-# 	  is used for posterior_push_mean.
-# 	"""
-# 	model = build_model(hps, kind=hps.kind, datasets=datasets)
-# 	model.write_model_runs(datasets, output_fname, push_mean)
-# 	return
+			###############################################################################
+			full_fname = os.path.join(hps.lfads_save_dir, fname)
+			write_data(full_fname, model_runs, compression='gzip')
+			
+			samples[data_name][data_kind] = model_runs
 
 
+x = datasets['dataset_N20_S20']['train_data']
+xp = samples['dataset_N20_S20']['train']['output_dist_params']
+
+y = datasets['dataset_N10_S10']['train_data']
+yp = samples['dataset_N10_S10']['train']['output_dist_params']
+
+from pylab import *
+
+figure()
+plot(np.mean(x, 0)[:,0])
+plot(np.mean(xp, 0)[:,0])
+
+figure()
+plot(np.mean(y, 0)[:,0])
+plot(np.mean(yp, 0)[:,0])
+
+
+show()
 
 
 # POSTERIOR PUSH MEAN
-
-# PRIOR SAMPLE
-
-# WRITE MODEL PARAMS
 
 
 # with sess.as_default():
